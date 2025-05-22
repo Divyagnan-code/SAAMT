@@ -1349,9 +1349,17 @@ class AnnotationTool:
             self.current_batch_start = 0
             self.thumbnail_cache = {}
             
+            # Initialize or update annotated images set
+            # If annotations exist for an image, consider it potentially annotated
+            self.annotated_images = set()
+            
             self.load_existing_annotations()
             self.start_thumbnail_loading()
             self.load_current_image()
+            
+            # Update annotated images tab
+            if hasattr(self, 'annotated_thumb_scrollable_frame'):
+                self.update_annotated_thumbnails()
             
             self.update_status(f"Loaded {len(self.image_files)} images from folder")
         else:
@@ -1822,6 +1830,121 @@ class AnnotationTool:
         self.save_annotations()
         self.update_status("✅ Annotations updated successfully")
     
+    def complete_current_annotation(self):
+        """Mark current image as completely annotated"""
+        if not self.image_files:
+            messagebox.showinfo("No Images", "Please load images first.")
+            return
+        
+        current_image_name = self.image_files[self.current_image_index]
+        
+        # First make sure annotations are updated
+        self.update_annotations()
+        
+        # Mark as annotated
+        if current_image_name in self.annotations and len(self.annotations[current_image_name]) > 0:
+            self.annotated_images.add(current_image_name)
+            self.update_status(f"✅ Image {current_image_name} marked as completely annotated")
+            
+            # Update the annotated images tab with this image
+            self.update_annotated_thumbnails()
+            
+            # Move to next image if available
+            if self.current_image_index < len(self.image_files) - 1:
+                self.current_image_index += 1
+                self.load_current_image()
+        else:
+            messagebox.showwarning("No Annotations", "Please add at least one annotation before completing.")
+    
+    def update_annotated_thumbnails(self):
+        """Update the annotated images thumbnails"""
+        # Clear existing thumbnails
+        for widget in self.annotated_thumb_scrollable_frame.winfo_children():
+            widget.destroy()
+        
+        # Filter images that are marked as annotated
+        annotated_files = [img for img in self.image_files if img in self.annotated_images]
+        
+        if not annotated_files:
+            # Show a message if no annotated images
+            msg_label = tk.Label(self.annotated_thumb_scrollable_frame, 
+                                text="No completed annotations yet", 
+                                bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_SECONDARY,
+                                font=('Segoe UI', 10))
+            msg_label.pack(pady=20)
+            return
+        
+        # Load thumbnails for annotated images
+        for i, image_file in enumerate(annotated_files):
+            try:
+                # Check if we already have this thumbnail
+                idx = self.image_files.index(image_file)
+                if idx in self.thumbnail_cache:
+                    photo = self.thumbnail_cache[idx]
+                else:
+                    # Create a new thumbnail
+                    image_path = os.path.join(self.images_folder, image_file)
+                    with Image.open(image_path) as img:
+                        # Convert to RGB if necessary
+                        if img.mode in ('RGBA', 'LA', 'P'):
+                            img = img.convert('RGB')
+                        
+                        # Create thumbnail
+                        img.thumbnail((160, 120), Image.Resampling.LANCZOS)
+                        photo = ImageTk.PhotoImage(img)
+                        self.thumbnail_cache[idx] = photo
+                
+                # Create thumbnail frame
+                thumb_frame = tk.Frame(self.annotated_thumb_scrollable_frame, bg=ModernColors.SIDEBAR_BG, 
+                                      relief=tk.SOLID, bd=1)
+                thumb_frame.pack(fill=tk.X, padx=5, pady=3)
+                
+                # Thumbnail button
+                thumb_btn = tk.Button(thumb_frame, image=photo, 
+                                     bg=ModernColors.SIDEBAR_BG, bd=0, relief=tk.FLAT,
+                                     cursor='hand2',
+                                     command=lambda idx=idx: self.jump_to_image(idx))
+                thumb_btn.image = photo  # Keep reference
+                thumb_btn.pack(pady=2)
+                
+                # Image name and status
+                info_frame = tk.Frame(thumb_frame, bg=ModernColors.SIDEBAR_BG)
+                info_frame.pack(fill=tk.X, padx=5)
+                
+                name_label = tk.Label(info_frame, 
+                                     text=f"{idx+1}. {image_file[:18]}{'...' if len(image_file) > 18 else ''}",
+                                     bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_SECONDARY,
+                                     font=('Segoe UI', 8), wraplength=180, justify=tk.LEFT)
+                name_label.pack(anchor=tk.W)
+                
+                # Annotation count
+                ann_count = len(self.annotations[image_file])
+                status_text = f"📝 {ann_count} annotations"
+                status_label = tk.Label(info_frame, text=status_text,
+                                       bg=ModernColors.SIDEBAR_BG, 
+                                       fg=ModernColors.ACCENT,
+                                       font=('Segoe UI', 7))
+                status_label.pack(anchor=tk.W, pady=(0, 3))
+                
+                # Hover effects
+                def on_enter(e, frame=thumb_frame):
+                    frame.configure(bg=ModernColors.ACCENT, relief=tk.SOLID)
+                
+                def on_leave(e, frame=thumb_frame):
+                    frame.configure(bg=ModernColors.SIDEBAR_BG, relief=tk.SOLID)
+                
+                thumb_frame.bind('<Enter>', on_enter)
+                thumb_frame.bind('<Leave>', on_leave)
+                thumb_btn.bind('<Enter>', on_enter)
+                thumb_btn.bind('<Leave>', on_leave)
+                name_label.bind('<Enter>', on_enter)
+                name_label.bind('<Leave>', on_leave)
+                status_label.bind('<Enter>', on_enter)
+                status_label.bind('<Leave>', on_leave)
+                
+            except Exception as e:
+                print(f"Error creating annotated thumbnail for {image_file}: {e}")
+    
     def save_annotations(self):
         """Save annotations to file"""
         if not self.images_folder:
@@ -1928,9 +2051,197 @@ class AnnotationTool:
         """Try model placeholder"""
         messagebox.showinfo("Try Model", "🧪 Model testing functionality will be implemented in the next phase.\n\nThis will include:\n• Load trained models\n• Real-time inference\n• Batch processing\n• Results visualization")
     
+    def complete_current_annotation(self):
+        """Mark current image as completely annotated"""
+        if not self.image_files:
+            messagebox.showinfo("No Images", "Please load images first.")
+            return
+        
+        current_image_name = self.image_files[self.current_image_index]
+        
+        # First make sure annotations are updated
+        self.update_annotations()
+        
+        # Mark as annotated
+        if current_image_name in self.annotations and len(self.annotations[current_image_name]) > 0:
+            self.annotated_images.add(current_image_name)
+            self.update_status(f"✅ Image {current_image_name} marked as completely annotated")
+            
+            # Update the annotated images tab with this image
+            if hasattr(self, 'annotated_thumb_scrollable_frame'):
+                self.update_annotated_thumbnails()
+            
+            # Move to next image if available
+            if self.current_image_index < len(self.image_files) - 1:
+                self.current_image_index += 1
+                self.load_current_image()
+        else:
+            messagebox.showwarning("No Annotations", "Please add at least one annotation before completing.")
+    
+    def update_annotated_thumbnails(self):
+        """Update the annotated images thumbnails"""
+        # Clear existing thumbnails
+        for widget in self.annotated_thumb_scrollable_frame.winfo_children():
+            widget.destroy()
+        
+        # Filter images that are marked as annotated
+        annotated_files = [img for img in self.image_files if img in self.annotated_images]
+        
+        if not annotated_files:
+            # Show a message if no annotated images
+            msg_label = tk.Label(self.annotated_thumb_scrollable_frame, 
+                                text="No completed annotations yet", 
+                                bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_SECONDARY,
+                                font=('Segoe UI', 10))
+            msg_label.pack(pady=20)
+            return
+        
+        # Load thumbnails for annotated images
+        for i, image_file in enumerate(annotated_files):
+            try:
+                # Check if we already have this thumbnail
+                idx = self.image_files.index(image_file)
+                if idx in self.thumbnail_cache:
+                    photo = self.thumbnail_cache[idx]
+                else:
+                    # Create a new thumbnail
+                    image_path = os.path.join(self.images_folder, image_file)
+                    with Image.open(image_path) as img:
+                        # Convert to RGB if necessary
+                        if img.mode in ('RGBA', 'LA', 'P'):
+                            img = img.convert('RGB')
+                        
+                        # Create thumbnail
+                        img.thumbnail((160, 120), Image.Resampling.LANCZOS)
+                        photo = ImageTk.PhotoImage(img)
+                        self.thumbnail_cache[idx] = photo
+                
+                # Create thumbnail frame
+                thumb_frame = tk.Frame(self.annotated_thumb_scrollable_frame, bg=ModernColors.SIDEBAR_BG, 
+                                      relief=tk.SOLID, bd=1)
+                thumb_frame.pack(fill=tk.X, padx=5, pady=3)
+                
+                # Thumbnail button
+                thumb_btn = tk.Button(thumb_frame, image=photo, 
+                                     bg=ModernColors.SIDEBAR_BG, bd=0, relief=tk.FLAT,
+                                     cursor='hand2',
+                                     command=lambda idx=idx: self.jump_to_image(idx))
+                thumb_btn.image = photo  # Keep reference
+                thumb_btn.pack(pady=2)
+                
+                # Image name and status
+                info_frame = tk.Frame(thumb_frame, bg=ModernColors.SIDEBAR_BG)
+                info_frame.pack(fill=tk.X, padx=5)
+                
+                name_label = tk.Label(info_frame, 
+                                     text=f"{idx+1}. {image_file[:18]}{'...' if len(image_file) > 18 else ''}",
+                                     bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_SECONDARY,
+                                     font=('Segoe UI', 8), wraplength=180, justify=tk.LEFT)
+                name_label.pack(anchor=tk.W)
+                
+                # Annotation count
+                ann_count = len(self.annotations[image_file])
+                status_text = f"📝 {ann_count} annotations"
+                status_label = tk.Label(info_frame, text=status_text,
+                                       bg=ModernColors.SIDEBAR_BG, 
+                                       fg=ModernColors.ACCENT,
+                                       font=('Segoe UI', 7))
+                status_label.pack(anchor=tk.W, pady=(0, 3))
+                
+                # Hover effects
+                def on_enter(e, frame=thumb_frame):
+                    frame.configure(bg=ModernColors.ACCENT, relief=tk.SOLID)
+                
+                def on_leave(e, frame=thumb_frame):
+                    frame.configure(bg=ModernColors.SIDEBAR_BG, relief=tk.SOLID)
+                
+                thumb_frame.bind('<Enter>', on_enter)
+                thumb_frame.bind('<Leave>', on_leave)
+                thumb_btn.bind('<Enter>', on_enter)
+                thumb_btn.bind('<Leave>', on_leave)
+                name_label.bind('<Enter>', on_enter)
+                name_label.bind('<Leave>', on_leave)
+                status_label.bind('<Enter>', on_enter)
+                status_label.bind('<Leave>', on_leave)
+                
+            except Exception as e:
+                print(f"Error creating annotated thumbnail for {image_file}: {e}")
+    
     def update_status(self, message):
         """Update status bar"""
         self.status_bar.configure(text=message)
+    
+    def toggle_boxes_visibility(self):
+        """Toggle the visibility of annotation boxes"""
+        if not hasattr(self, 'boxes_visible'):
+            self.boxes_visible = True
+        
+        # Toggle state
+        self.boxes_visible = not self.boxes_visible
+        
+        if self.boxes_visible:
+            # Show boxes
+            self.redraw_annotations()
+            self.update_status("👁️ Bounding boxes are now visible")
+            if hasattr(self, 'visibility_btn'):
+                self.visibility_btn.configure(text="👁️ Hide Boxes")
+        else:
+            # Hide boxes
+            self.canvas.delete('annotation')
+            self.canvas.delete('selected')
+            self.update_status("👂 Bounding boxes are now hidden")
+            if hasattr(self, 'visibility_btn'):
+                self.visibility_btn.configure(text="👁️ Show Boxes")
+    
+    def jump_to_image_by_number(self):
+        """Jump to a specific image by its number"""
+        if not self.image_files:
+            messagebox.showinfo("No Images", "Please load images first.")
+            return
+        
+        try:
+            if not hasattr(self, 'jump_entry') or not self.jump_entry:
+                return
+            
+            # Get the number from the entry field
+            image_number = int(self.jump_entry.get())
+            
+            # Check if the number is valid
+            if image_number < 1 or image_number > len(self.image_files):
+                messagebox.showwarning("Invalid Number", 
+                                    f"Please enter a number between 1 and {len(self.image_files)}")
+                return
+            
+            # Adjust for 0-based indexing
+            target_index = image_number - 1
+            
+            # Jump to the image
+            self.jump_to_image(target_index)
+            self.update_status(f"Navigated to image {image_number} of {len(self.image_files)}")
+            
+            # Clear the entry field
+            self.jump_entry.delete(0, tk.END)
+            
+        except ValueError:
+            messagebox.showwarning("Invalid Input", "Please enter a valid number.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+    
+    def jump_to_image(self, index):
+        """Jump directly to an image by its index"""
+        if not self.image_files:
+            return
+        
+        # Make sure index is valid
+        if index < 0 or index >= len(self.image_files):
+            return
+        
+        # Save current annotations before jumping
+        self.update_annotations()
+        
+        # Update index and load the image
+        self.current_image_index = index
+        self.load_current_image()
     
     def cleanup_memory(self):
         """Clean up memory"""
