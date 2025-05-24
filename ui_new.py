@@ -9,20 +9,161 @@ import threading
 import queue
 import time
 import copy
-from auto_annotator import ModelManager
-from ui_components import (ModernColors, ModernButton,
-                           create_enhanced_toolbar, create_enhanced_sidebar,
-                           create_enhanced_canvas_area, create_enhanced_right_controls,
-                           create_status_bar)
-from utils import UndoRedoManager
-from annotation_manager import AnnotationManager
-from event_handlers import ( # Import new handlers
-    select_folder_handler, previous_image_handler, next_image_handler,
-    zoom_in_handler, zoom_out_handler, reset_zoom_handler,
-    try_model_handler, train_model_handler, on_mode_change_handler,
-    on_model_change_handler, on_confidence_change_handler,
-    jump_to_image_by_number_handler, toggle_boxes_visibility_handler
-)
+
+class ModernColors:
+    """Modern color scheme for the application"""
+    DARK_BG = '#1e1e1e'
+    DARKER_BG = '#252526'
+    SIDEBAR_BG = '#2d2d30'
+    BUTTON_PRIMARY = '#0e639c'
+    BUTTON_PRIMARY_HOVER = '#1177bb'
+    BUTTON_SECONDARY = '#5a5a5a'
+    BUTTON_SUCCESS = '#0e7a0d'
+    BUTTON_WARNING = '#ca5010'
+    BUTTON_DANGER = '#d13438'
+    TEXT_PRIMARY = '#ffffff'
+    TEXT_SECONDARY = '#cccccc'
+    BORDER = '#3c3c3c'
+    ACCENT = '#007acc'
+    CANVAS_BG = '#f5f5f5'
+    MODEL_ANNOTATION = '#ff9500'
+    HANDLE_COLOR = '#00ff00'
+
+class ModernButton(tk.Button):
+    """Custom modern-looking button"""
+    def __init__(self, parent, **kwargs):
+        # Extract custom parameters
+        hover_color = kwargs.pop('hover_color', ModernColors.BUTTON_PRIMARY_HOVER)
+        normal_color = kwargs.pop('bg', ModernColors.BUTTON_PRIMARY)
+        
+        # Set default styling
+        default_style = {
+            'bg': normal_color,
+            'fg': ModernColors.TEXT_PRIMARY,
+            'font': ('Segoe UI', 9),
+            'relief': 'flat',
+            'borderwidth': 0,
+            'cursor': 'hand2',
+            'activebackground': hover_color,
+            'activeforeground': ModernColors.TEXT_PRIMARY
+        }
+        
+        # Merge with provided kwargs
+        default_style.update(kwargs)
+        
+        super().__init__(parent, **default_style)
+        
+        # Store colors for hover effects
+        self.normal_color = normal_color
+        self.hover_color = hover_color
+        
+        # Bind hover effects
+        self.bind('<Enter>', lambda e: self.configure(bg=self.hover_color))
+        self.bind('<Leave>', lambda e: self.configure(bg=self.normal_color))
+
+class UndoRedoManager:
+    """Manages undo/redo operations"""
+    def __init__(self, max_history=50):
+        self.history = []
+        self.current_index = -1
+        self.max_history = max_history
+    
+    def save_state(self, state):
+        """Save current state"""
+        # Remove any future history if we're not at the end
+        if self.current_index < len(self.history) - 1:
+            self.history = self.history[:self.current_index + 1]
+        
+        # Add new state
+        self.history.append(copy.deepcopy(state))
+        self.current_index += 1
+        
+        # Limit history size
+        if len(self.history) > self.max_history:
+            self.history.pop(0)
+            self.current_index -= 1
+    
+    def undo(self):
+        """Undo last operation"""
+        if self.current_index > 0:
+            self.current_index -= 1
+            return copy.deepcopy(self.history[self.current_index])
+        return None
+    
+    def redo(self):
+        """Redo next operation"""
+        if self.current_index < len(self.history) - 1:
+            self.current_index += 1
+            return copy.deepcopy(self.history[self.current_index])
+        return None
+    
+    def can_undo(self):
+        return self.current_index > 0
+    
+    def can_redo(self):
+        return self.current_index < len(self.history) - 1
+
+class ModelManager:
+    """Manages AI models for annotation"""
+    def __init__(self, script_dir):
+        self.script_dir = script_dir
+        self.models_dir = os.path.join(script_dir, "models")
+        self.current_model = None
+        self.confidence_threshold = 0.5
+    
+    def get_available_models(self, mode):
+        """Get available models for the specified mode"""
+        mode_dir = os.path.join(self.models_dir, mode)
+        if not os.path.exists(mode_dir):
+            os.makedirs(mode_dir, exist_ok=True)
+            return []
+        
+        models = []
+        for file in os.listdir(mode_dir):
+            if file.endswith(('.pt', '.pth', '.onnx', '.pkl')):
+                models.append(file)
+        return models
+    
+    def load_model(self, model_name, mode):
+        """Load specified model"""
+        model_path = os.path.join(self.models_dir, mode, model_name)
+        if os.path.exists(model_path):
+            self.current_model = model_name
+            print(f"Model {model_name} loaded (placeholder)")
+            return True
+        return False
+    
+    def predict(self, image_path, class_filter=None):
+        """Make predictions on image (placeholder implementation)"""
+        if not self.current_model:
+            return []
+        
+        # Placeholder implementation - returns dummy annotations
+        # In real implementation, this would call your AI model
+        dummy_annotations = [
+            {
+                'class': 'person',
+                'bbox': [100, 50, 200, 300],
+                'confidence': 0.85,
+                'color': ModernColors.MODEL_ANNOTATION,
+                'is_model_annotation': True
+            },
+            {
+                'class': 'car',
+                'bbox': [300, 200, 450, 320],
+                'confidence': 0.72,
+                'color': ModernColors.MODEL_ANNOTATION,
+                'is_model_annotation': True
+            }
+        ]
+        
+        # Filter by confidence threshold
+        filtered_annotations = [
+            ann for ann in dummy_annotations 
+            if ann['confidence'] >= self.confidence_threshold
+        ]
+        
+        return filtered_annotations
 
 class AnnotationTool:
     def __init__(self, root):
@@ -38,7 +179,6 @@ class AnnotationTool:
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.model_manager = ModelManager(self.script_dir)
         self.undo_manager = UndoRedoManager()
-        self.annotation_manager = AnnotationManager()
         
         # Data structures
         self.images_folder = ""
@@ -47,6 +187,14 @@ class AnnotationTool:
         self.current_image_index = 0
         self.current_image = None
         self.photo_image = None
+        
+        # Annotation data
+        self.annotations = {}
+        self.temp_annotations = []
+        self.last_copied_annotation = None
+        self.current_class = "person"
+        self.annotation_colors = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff', '#44ffff']
+        self.color_index = 0
         
         # Drawing and editing state
         self.drawing = False
@@ -110,7 +258,7 @@ class AnnotationTool:
         # Top section (toolbar)
         toolbar_frame = tk.Frame(main_paned, bg=ModernColors.SIDEBAR_BG, height=120)
         main_paned.add(toolbar_frame, weight=0)
-        create_enhanced_toolbar(toolbar_frame, self) # Use imported function
+        self.create_enhanced_toolbar(toolbar_frame)
         
         # Content section
         content_paned = ttk.PanedWindow(main_paned, orient=tk.HORIZONTAL)
@@ -120,36 +268,411 @@ class AnnotationTool:
         # Left sidebar
         left_frame = tk.Frame(content_paned, bg=ModernColors.SIDEBAR_BG, width=250)
         content_paned.add(left_frame, weight=0)
-        create_enhanced_sidebar(left_frame, self) # Use imported function
+        self.create_enhanced_sidebar(left_frame)
         
         # Center canvas area
         center_frame = tk.Frame(content_paned, bg=ModernColors.DARK_BG)
         content_paned.add(center_frame, weight=2)
-        create_enhanced_canvas_area(center_frame, self) # Use imported function
+        self.create_enhanced_canvas_area(center_frame)
         
         # Right controls
         right_frame = tk.Frame(content_paned, bg=ModernColors.SIDEBAR_BG, width=300)
         content_paned.add(right_frame, weight=0)
-        create_enhanced_right_controls(right_frame, self) # Use imported function
+        self.create_enhanced_right_controls(right_frame)
         
         # Status bar
-        create_status_bar(main_frame, self) # Use imported function
+        self.create_status_bar(main_frame)
     
-    # Removed create_enhanced_toolbar, create_enhanced_sidebar, 
-    # create_enhanced_canvas_area, create_enhanced_right_controls, 
-    # and create_status_bar method definitions from here.
+    def create_enhanced_toolbar(self, parent):
+        """Create enhanced toolbar with model controls"""
+        toolbar = tk.Frame(parent, bg=ModernColors.SIDEBAR_BG)
+        toolbar.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # First row - File and Mode controls
+        top_row = tk.Frame(toolbar, bg=ModernColors.SIDEBAR_BG)
+        top_row.pack(fill=tk.X, pady=(0, 5))
+        
+        # Folder selection
+        folder_btn = ModernButton(top_row, text="📁 Select Images Folder", 
+                                 command=self.select_folder, font=('Segoe UI', 10, 'bold'),
+                                 padx=20, pady=8)
+        folder_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Mode selection
+        mode_frame = tk.Frame(top_row, bg=ModernColors.SIDEBAR_BG)
+        mode_frame.pack(side=tk.LEFT, padx=10)
+        
+        tk.Label(mode_frame, text="Mode:", bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY, 
+                font=('Segoe UI', 9)).pack(anchor=tk.W)
+        self.annotation_mode = tk.StringVar(value="bounding_box")
+        mode_combo = ttk.Combobox(mode_frame, textvariable=self.annotation_mode,
+                                 values=["bounding_box", "instance_segmentation", "classification"],
+                                 state="readonly", width=18, style='Modern.TCombobox')
+        mode_combo.pack()
+        mode_combo.bind('<<ComboboxSelected>>', self.on_mode_change)
+        
+        # Action buttons
+        action_frame = tk.Frame(top_row, bg=ModernColors.SIDEBAR_BG)
+        action_frame.pack(side=tk.RIGHT)
+        
+        try_btn = ModernButton(action_frame, text="🧪 Try Model", 
+                              command=self.try_model, bg=ModernColors.BUTTON_WARNING,
+                              hover_color='#e86900', font=('Segoe UI', 10), padx=15, pady=8)
+        try_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        train_btn = ModernButton(action_frame, text="🚀 Train Model", 
+                                command=self.train_model, bg=ModernColors.BUTTON_DANGER,
+                                hover_color='#e74856', font=('Segoe UI', 10), padx=15, pady=8)
+        train_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Second row - Model controls
+        model_row = tk.Frame(toolbar, bg=ModernColors.SIDEBAR_BG)
+        model_row.pack(fill=tk.X, pady=5)
+        
+        # Model selection
+        model_frame = tk.Frame(model_row, bg=ModernColors.SIDEBAR_BG)
+        model_frame.pack(side=tk.LEFT)
+        
+        tk.Label(model_frame, text="AI Model:", bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY, 
+                font=('Segoe UI', 9)).pack(anchor=tk.W)
+        self.model_var = tk.StringVar()
+        self.model_combo = ttk.Combobox(model_frame, textvariable=self.model_var,
+                                       state="readonly", width=25, style='Modern.TCombobox')
+        self.model_combo.pack()
+        self.model_combo.bind('<<ComboboxSelected>>', self.on_model_change)
+        
+        # Confidence threshold
+        confidence_frame = tk.Frame(model_row, bg=ModernColors.SIDEBAR_BG)
+        confidence_frame.pack(side=tk.LEFT, padx=(20, 0))
+        
+        tk.Label(confidence_frame, text="Confidence:", bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY, 
+                font=('Segoe UI', 9)).pack(anchor=tk.W)
+        
+        conf_control_frame = tk.Frame(confidence_frame, bg=ModernColors.SIDEBAR_BG)
+        conf_control_frame.pack()
+        
+        self.confidence_var = tk.DoubleVar(value=0.5)
+        self.confidence_scale = tk.Scale(conf_control_frame, from_=0.1, to=1.0, resolution=0.05,
+                                        orient=tk.HORIZONTAL, variable=self.confidence_var,
+                                        bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY,
+                                        highlightthickness=0, length=150)
+        self.confidence_scale.pack(side=tk.LEFT)
+        
+        self.confidence_label = tk.Label(conf_control_frame, text="0.50", 
+                                        bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY,
+                                        font=('Segoe UI', 9), width=5)
+        self.confidence_label.pack(side=tk.LEFT, padx=(5, 0))
+        
+        self.confidence_scale.configure(command=self.on_confidence_change)
+        
+        # Model action buttons
+        model_actions = tk.Frame(model_row, bg=ModernColors.SIDEBAR_BG)
+        model_actions.pack(side=tk.RIGHT)
+        
+        ModernButton(model_actions, text="🤖 Annotate Current", 
+                    command=self.annotate_current_image, bg='#6f42c1',
+                    hover_color='#8a63d2', font=('Segoe UI', 9), padx=12, pady=6).pack(side=tk.LEFT, padx=2)
+        
+        ModernButton(model_actions, text="📊 Batch Annotate", 
+                    command=self.show_batch_dialog, bg='#17a2b8',
+                    hover_color='#138496', font=('Segoe UI', 9), padx=12, pady=6).pack(side=tk.LEFT, padx=2)
+        
+        # Progress section
+        self.progress_frame = tk.Frame(toolbar, bg=ModernColors.SIDEBAR_BG)
+        
+        self.progress_label = tk.Label(self.progress_frame, text="", bg=ModernColors.SIDEBAR_BG, 
+                                      fg=ModernColors.TEXT_SECONDARY, font=('Segoe UI', 9))
+        self.progress_label.pack()
+        
+        self.progress_bar = ttk.Progressbar(self.progress_frame, length=400, mode='determinate',
+                                           style='Modern.Horizontal.TProgressbar')
+        self.progress_bar.pack()
+        
+        # Initialize model list
+        self.update_model_list()
+    
+    def create_enhanced_sidebar(self, parent):
+        """Create enhanced left sidebar with scrollable thumbnails"""
+        # Header
+        header_frame = tk.Frame(parent, bg=ModernColors.SIDEBAR_BG)
+        header_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        tk.Label(header_frame, text="📷 Images", bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY,
+                font=('Segoe UI', 12, 'bold')).pack(side=tk.LEFT)
+        
+        # Load more button
+        self.load_more_btn = ModernButton(header_frame, text="⬇️", 
+                                         command=self.load_more_thumbnails, 
+                                         bg=ModernColors.BUTTON_SECONDARY,
+                                         font=('Segoe UI', 8), padx=8, pady=4)
+        self.load_more_btn.pack(side=tk.RIGHT)
+        self.load_more_btn.pack_forget()
+        
+        # Thumbnails container with proper scrolling
+        thumb_container = tk.Frame(parent, bg=ModernColors.SIDEBAR_BG)
+        thumb_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 10))
+        
+        # Create scrollable frame with both vertical and horizontal scrolling
+        self.thumb_canvas = tk.Canvas(thumb_container, bg=ModernColors.SIDEBAR_BG, 
+                                     highlightthickness=0, bd=0)
+        
+        # Scrollbars
+        v_scrollbar = ttk.Scrollbar(thumb_container, orient="vertical", 
+                                   command=self.thumb_canvas.yview)
+        h_scrollbar = ttk.Scrollbar(thumb_container, orient="horizontal",
+                                   command=self.thumb_canvas.xview)
+        
+        self.thumb_scrollable_frame = tk.Frame(self.thumb_canvas, bg=ModernColors.SIDEBAR_BG)
+        
+        # Configure scrolling
+        self.thumb_scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.thumb_canvas.configure(scrollregion=self.thumb_canvas.bbox("all"))
+        )
+        
+        self.thumb_canvas_window = self.thumb_canvas.create_window((0, 0), 
+                                                                  window=self.thumb_scrollable_frame, 
+                                                                  anchor="nw")
+        self.thumb_canvas.configure(yscrollcommand=v_scrollbar.set, 
+                                   xscrollcommand=h_scrollbar.set)
+        
+        # Enhanced mousewheel scrolling
+        def _on_mousewheel(event):
+            # Check if shift is held for horizontal scrolling
+            if event.state & 0x1:  # Shift key
+                self.thumb_canvas.xview_scroll(int(-1*(event.delta/120)), "units")
+            else:
+                self.thumb_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        self.thumb_canvas.bind("<MouseWheel>", _on_mousewheel)
+        self.thumb_scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
+        
+        # Update scroll region when canvas size changes
+        def _configure_scroll_region(event):
+            self.thumb_canvas.configure(scrollregion=self.thumb_canvas.bbox("all"))
+            canvas_width = event.width
+            self.thumb_canvas.itemconfig(self.thumb_canvas_window, width=canvas_width)
+        
+        self.thumb_canvas.bind('<Configure>', _configure_scroll_region)
+        
+        # Pack scrollbars and canvas
+        self.thumb_canvas.grid(row=0, column=0, sticky="nsew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        
+        thumb_container.grid_rowconfigure(0, weight=1)
+        thumb_container.grid_columnconfigure(0, weight=1)
+    
+    def create_enhanced_canvas_area(self, parent):
+        """Create enhanced canvas area with editing capabilities"""
+        # Canvas controls
+        controls_frame = tk.Frame(parent, bg=ModernColors.DARKER_BG, height=60)
+        controls_frame.pack(fill=tk.X, pady=(0, 5))
+        controls_frame.pack_propagate(False)
+        
+        # Navigation section
+        nav_frame = tk.Frame(controls_frame, bg=ModernColors.DARKER_BG)
+        nav_frame.pack(side=tk.LEFT, pady=12, padx=15)
+        
+        prev_btn = ModernButton(nav_frame, text="◀ Previous", command=self.previous_image,
+                               bg=ModernColors.BUTTON_SECONDARY, font=('Segoe UI', 9), padx=12, pady=6)
+        prev_btn.pack(side=tk.LEFT, padx=(0, 8))
+        
+        next_btn = ModernButton(nav_frame, text="Next ▶", command=self.next_image,
+                               bg=ModernColors.BUTTON_SECONDARY, font=('Segoe UI', 9), padx=12, pady=6)
+        next_btn.pack(side=tk.LEFT)
+        
+        # Jump to image
+        jump_frame = tk.Frame(controls_frame, bg=ModernColors.DARKER_BG)
+        jump_frame.pack(side=tk.LEFT, pady=12, padx=20)
+        
+        tk.Label(jump_frame, text="Go to:", bg=ModernColors.DARKER_BG, fg=ModernColors.TEXT_SECONDARY, 
+                font=('Segoe UI', 9)).pack(side=tk.LEFT, padx=(0, 8))
+        
+        self.jump_var = tk.StringVar()
+        jump_entry = tk.Entry(jump_frame, textvariable=self.jump_var, width=8, 
+                             font=('Segoe UI', 9), bg=ModernColors.CANVAS_BG, fg='#000000', bd=1)
+        jump_entry.pack(side=tk.LEFT, padx=(0, 8))
+        jump_entry.bind('<Return>', self.jump_to_image_by_number)
+        
+        jump_btn = ModernButton(jump_frame, text="Go", command=self.jump_to_image_by_number,
+                               bg=ModernColors.BUTTON_SECONDARY, font=('Segoe UI', 9), padx=10, pady=4)
+        jump_btn.pack(side=tk.LEFT)
+        
+        # Zoom controls
+        zoom_frame = tk.Frame(controls_frame, bg=ModernColors.DARKER_BG)
+        zoom_frame.pack(side=tk.LEFT, pady=12, padx=20)
+        
+        ModernButton(zoom_frame, text="🔍+", command=self.zoom_in,
+                    bg=ModernColors.BUTTON_SECONDARY, font=('Segoe UI', 9), width=4, pady=4).pack(side=tk.LEFT, padx=2)
+        ModernButton(zoom_frame, text="🔍-", command=self.zoom_out,
+                    bg=ModernColors.BUTTON_SECONDARY, font=('Segoe UI', 9), width=4, pady=4).pack(side=tk.LEFT, padx=2)
+        ModernButton(zoom_frame, text="⌂", command=self.reset_zoom,
+                    bg=ModernColors.BUTTON_SECONDARY, font=('Segoe UI', 9), width=4, pady=4).pack(side=tk.LEFT, padx=2)
+        
+        # Edit controls
+        edit_frame = tk.Frame(controls_frame, bg=ModernColors.DARKER_BG)
+        edit_frame.pack(side=tk.LEFT, pady=12, padx=20)
+        
+        ModernButton(edit_frame, text="📋 Copy", command=self.copy_annotation,
+                    bg='#28a745', hover_color='#34ce57', font=('Segoe UI', 9), padx=8, pady=4).pack(side=tk.LEFT, padx=2)
+        ModernButton(edit_frame, text="📄 Paste", command=self.paste_annotation,
+                    bg='#ffc107', hover_color='#ffcd39', font=('Segoe UI', 9), padx=8, pady=4).pack(side=tk.LEFT, padx=2)
+        
+        # Visibility toggle
+        toggle_frame = tk.Frame(controls_frame, bg=ModernColors.DARKER_BG)
+        toggle_frame.pack(side=tk.RIGHT, pady=12, padx=15)
+        
+        self.visibility_btn = ModernButton(toggle_frame, text="👁️ Hide Boxes", 
+                                          command=self.toggle_boxes_visibility,
+                                          bg='#6f42c1', hover_color='#8a63d2',
+                                          font=('Segoe UI', 9), padx=12, pady=6)
+        self.visibility_btn.pack()
+        
+        # Canvas container
+        canvas_container = tk.Frame(parent, bg=ModernColors.BORDER, bd=1, relief=tk.SOLID)
+        canvas_container.pack(fill=tk.BOTH, expand=True)
+        
+        self.canvas = tk.Canvas(canvas_container, bg=ModernColors.CANVAS_BG, cursor="crosshair")
+        
+        # Scrollbars
+        h_scrollbar = ttk.Scrollbar(canvas_container, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        v_scrollbar = ttk.Scrollbar(canvas_container, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(xscrollcommand=h_scrollbar.set, yscrollcommand=v_scrollbar.set)
+        
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        canvas_container.grid_rowconfigure(0, weight=1)
+        canvas_container.grid_columnconfigure(0, weight=1)
+        
+        # Enhanced canvas events for editing
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
+        self.canvas.bind("<Button-3>", self.on_right_click)
+        self.canvas.bind("<B3-Motion>", self.on_pan)
+        self.canvas.bind("<ButtonRelease-3>", self.end_pan)
+        self.canvas.bind("<MouseWheel>", self.on_mousewheel)
+        self.canvas.bind("<Motion>", self.on_mouse_motion)
+        self.canvas.bind("<Double-Button-1>", self.on_double_click)
+    
+    def create_enhanced_right_controls(self, parent):
+        """Create enhanced right sidebar with model annotation controls"""
+        # Class input section
+        class_frame = tk.LabelFrame(parent, text=" 🏷️ Annotation Class ", 
+                                   bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY, 
+                                   font=('Segoe UI', 10, 'bold'), bd=1, relief=tk.SOLID)
+        class_frame.pack(fill=tk.X, padx=15, pady=(15, 10))
+        
+        self.class_var = tk.StringVar(value=self.current_class)
+        class_entry = tk.Entry(class_frame, textvariable=self.class_var, 
+                              font=('Segoe UI', 11), bg=ModernColors.CANVAS_BG, fg='#000000', 
+                              bd=1, relief=tk.SOLID)
+        class_entry.pack(fill=tk.X, padx=10, pady=(10, 5))
+        class_entry.bind('<Return>', self.update_current_class)
+        
+        ModernButton(class_frame, text="✓ Update Class", command=self.update_current_class,
+                    bg=ModernColors.BUTTON_SUCCESS, hover_color='#16a085',
+                    font=('Segoe UI', 9), pady=6).pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        # Model annotation review section
+        self.review_frame = tk.LabelFrame(parent, text=" 🤖 Model Annotation Review ", 
+                                         bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY, 
+                                         font=('Segoe UI', 10, 'bold'), bd=1, relief=tk.SOLID)
+        self.review_frame.pack(fill=tk.X, padx=15, pady=10)
+        self.review_frame.pack_forget()  # Hidden by default
+        
+        review_buttons = tk.Frame(self.review_frame, bg=ModernColors.SIDEBAR_BG)
+        review_buttons.pack(fill=tk.X, padx=10, pady=10)
+        
+        ModernButton(review_buttons, text="✅ Approve All", command=self.approve_model_annotations,
+                    bg=ModernColors.BUTTON_SUCCESS, hover_color='#16a085',
+                    font=('Segoe UI', 9), pady=6).pack(fill=tk.X, pady=2)
+        
+        ModernButton(review_buttons, text="✏️ Edit & Approve", command=self.edit_model_annotations,
+                    bg=ModernColors.BUTTON_WARNING, hover_color='#e86900',
+                    font=('Segoe UI', 9), pady=6).pack(fill=tk.X, pady=2)
+        
+        ModernButton(review_buttons, text="❌ Reject All", command=self.reject_model_annotations,
+                    bg=ModernColors.BUTTON_DANGER, hover_color='#e74856',
+                    font=('Segoe UI', 9), pady=6).pack(fill=tk.X, pady=2)
+        
+        # Current annotations
+        annotations_frame = tk.LabelFrame(parent, text=" 📝 Current Annotations ", 
+                                         bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY, 
+                                         font=('Segoe UI', 10, 'bold'), bd=1, relief=tk.SOLID)
+        annotations_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+        
+        # Listbox container
+        list_container = tk.Frame(annotations_frame, bg=ModernColors.SIDEBAR_BG)
+        list_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.annotations_listbox = tk.Listbox(list_container, bg=ModernColors.CANVAS_BG, 
+                                             fg='#000000', font=('Segoe UI', 9),
+                                             selectbackground=ModernColors.ACCENT,
+                                             bd=1, relief=tk.SOLID)
+        list_scrollbar = ttk.Scrollbar(list_container, orient="vertical", 
+                                      command=self.annotations_listbox.yview)
+        self.annotations_listbox.configure(yscrollcommand=list_scrollbar.set)
+        
+        self.annotations_listbox.pack(side="left", fill="both", expand=True)
+        list_scrollbar.pack(side="right", fill="y")
+        
+        # Bind selection event
+        self.annotations_listbox.bind('<<ListboxSelect>>', self.on_annotation_select)
+        
+        # Annotation controls
+        controls_container = tk.Frame(annotations_frame, bg=ModernColors.SIDEBAR_BG)
+        controls_container.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        ModernButton(controls_container, text="🎨 Change Color", 
+                    command=self.change_annotation_color,
+                    bg=ModernColors.BUTTON_WARNING, hover_color='#e86900',
+                    font=('Segoe UI', 9), pady=5).pack(fill=tk.X, pady=2)
+        
+        ModernButton(controls_container, text="🗑️ Delete Selected", 
+                    command=self.delete_selected_annotation,
+                    bg=ModernColors.BUTTON_DANGER, hover_color='#e74856',
+                    font=('Segoe UI', 9), pady=5).pack(fill=tk.X, pady=2)
+        
+        # Action buttons
+        action_frame = tk.LabelFrame(parent, text=" ⚡ Actions ", 
+                                    bg=ModernColors.SIDEBAR_BG, fg=ModernColors.TEXT_PRIMARY, 
+                                    font=('Segoe UI', 10, 'bold'), bd=1, relief=tk.SOLID)
+        action_frame.pack(fill=tk.X, padx=15, pady=(10, 15))
+        
+        ModernButton(action_frame, text="💾 Update Annotations", command=self.update_annotations,
+                    bg=ModernColors.BUTTON_SUCCESS, hover_color='#16a085',
+                    font=('Segoe UI', 10, 'bold'), pady=8).pack(fill=tk.X, padx=10, pady=(10, 5))
+        
+        ModernButton(action_frame, text="👀 Preview Annotations", command=self.preview_annotations,
+                    bg=ModernColors.BUTTON_PRIMARY, hover_color=ModernColors.BUTTON_PRIMARY_HOVER,
+                    font=('Segoe UI', 10, 'bold'), pady=8).pack(fill=tk.X, padx=10, pady=(5, 10))
+    
+    def create_status_bar(self, parent):
+        """Create bottom status bar"""
+        status_frame = tk.Frame(parent, bg=ModernColors.DARKER_BG, height=35)
+        status_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(5, 0))
+        status_frame.pack_propagate(False)
+        
+        self.status_bar = tk.Label(status_frame, text="Ready - Select a folder to begin", 
+                                  bg=ModernColors.DARKER_BG, fg=ModernColors.TEXT_SECONDARY, 
+                                  font=('Segoe UI', 9), anchor=tk.W)
+        self.status_bar.pack(fill=tk.BOTH, padx=15, pady=8)
     
     def save_initial_state(self):
         """Save initial state for undo/redo"""
         self.undo_manager.save_state({
-            'temp_annotations': [], # Managed by annotation_manager, but snapshot for undo needed
+            'temp_annotations': [],
             'current_image_index': 0
         })
     
     def save_state_for_undo(self):
         """Save current state for undo/redo"""
         state = {
-            'temp_annotations': copy.deepcopy(self.annotation_manager.temp_annotations),
+            'temp_annotations': copy.deepcopy(self.temp_annotations),
             'current_image_index': self.current_image_index
         }
         self.undo_manager.save_state(state)
@@ -158,7 +681,7 @@ class AnnotationTool:
         """Undo last action"""
         state = self.undo_manager.undo()
         if state:
-            self.annotation_manager.temp_annotations = state['temp_annotations']
+            self.temp_annotations = state['temp_annotations']
             self.display_image_on_canvas()
             self.update_annotations_list()
             self.update_status("↶ Undo completed")
@@ -167,13 +690,29 @@ class AnnotationTool:
         """Redo last undone action"""
         state = self.undo_manager.redo()
         if state:
-            self.annotation_manager.temp_annotations = state['temp_annotations']
+            self.temp_annotations = state['temp_annotations']
             self.display_image_on_canvas()
             self.update_annotations_list()
             self.update_status("↷ Redo completed")
     
-    # Removed on_mode_change, on_model_change, on_confidence_change
-    # Their logic is now in event_handlers.py and called from ui_components.py
+    def on_mode_change(self, event=None):
+        """Handle mode change"""
+        self.update_model_list()
+    
+    def on_model_change(self, event=None):
+        """Handle model selection change"""
+        model_name = self.model_var.get()
+        if model_name:
+            mode = self.annotation_mode.get()
+            if self.model_manager.load_model(model_name, mode):
+                self.update_status(f"Model '{model_name}' loaded successfully")
+            else:
+                self.update_status(f"Failed to load model '{model_name}'")
+    
+    def on_confidence_change(self, value):
+        """Handle confidence threshold change"""
+        self.model_manager.confidence_threshold = float(value)
+        self.confidence_label.configure(text=f"{float(value):.2f}")
     
     def update_model_list(self):
         """Update the model dropdown list"""
@@ -196,7 +735,7 @@ class AnnotationTool:
         
         try:
             # Get model predictions
-            predictions = self.model_manager.predict(image_path, self.annotation_manager.current_class, prompt=None, anti_prompt=None)
+            predictions = self.model_manager.predict(image_path, self.current_class)
             
             if predictions:
                 self.model_annotations = predictions
@@ -336,7 +875,7 @@ class AnnotationTool:
                 # Get predictions
                 image_path = os.path.join(self.images_folder, image_name)
                 try:
-                    predictions = self.model_manager.predict(image_path, self.annotation_manager.current_class, prompt=None, anti_prompt=None)
+                    predictions = self.model_manager.predict(image_path, self.current_class)
                     
                     if predictions:
                         if auto_approve:
@@ -344,17 +883,17 @@ class AnnotationTool:
                             high_conf_annotations = [ann for ann in predictions if ann.get('confidence', 0) > 0.9]
                             if high_conf_annotations:
                                 # Convert model annotations to regular annotations
-                                for ann_model in high_conf_annotations: # Renamed to avoid conflict
-                                    ann_model.pop('is_model_annotation', None)
-                                    ann_model.pop('confidence', None)
-                                    if 'color' not in ann_model:
-                                        ann_model['color'] = self.annotation_manager.annotation_colors[approved % len(self.annotation_manager.annotation_colors)]
+                                for ann in high_conf_annotations:
+                                    ann.pop('is_model_annotation', None)
+                                    ann.pop('confidence', None)
+                                    if 'color' not in ann:
+                                        ann['color'] = self.annotation_colors[approved % len(self.annotation_colors)]
                                 
-                                self.annotation_manager.annotations[image_name] = high_conf_annotations
+                                self.annotations[image_name] = high_conf_annotations
                                 approved += len(high_conf_annotations)
                         else:
                             # Save for manual review
-                            self.annotation_manager.annotations[image_name + "_model_pending"] = predictions
+                            self.annotations[image_name + "_model_pending"] = predictions
                 
                 except Exception as e:
                     print(f"Error processing {image_name}: {e}")
@@ -378,7 +917,7 @@ class AnnotationTool:
         """Finish batch annotation"""
         self.batch_processing = False
         self.progress_frame.pack_forget()
-        self.annotation_manager.save_annotations(self.images_folder)
+        self.save_annotations()
         
         message = f"Batch annotation completed!\n\nProcessed: {processed} images"
         if approved > 0:
@@ -392,9 +931,15 @@ class AnnotationTool:
         if self.model_annotations:
             self.save_state_for_undo()
             
-            # Convert model annotations to regular annotations by AnnotationManager
-            num_approved = self.annotation_manager.approve_model_annotations(self.model_annotations)
-            self.model_annotations = [] # Clear model specific annotations in AnnotationTool
+            # Convert model annotations to regular annotations
+            for ann in self.model_annotations:
+                ann.pop('is_model_annotation', None)
+                ann.pop('confidence', None)
+                if 'color' not in ann:
+                    ann['color'] = self.annotation_colors[len(self.temp_annotations) % len(self.annotation_colors)]
+                self.temp_annotations.append(ann)
+            
+            self.model_annotations = []
             self.reviewing_model_annotations = False
             self.review_frame.pack_forget()
             
@@ -418,60 +963,68 @@ class AnnotationTool:
         self.update_status("❌ Model annotations rejected")
     
     def copy_annotation(self):
-        """Copy selected annotation using AnnotationManager."""
+        """Copy selected annotation"""
         selection = self.annotations_listbox.curselection()
-        if selection:
-            idx = selection[0]
-            if self.annotation_manager.copy_annotation(idx):
-                self.update_status("📋 Annotation copied")
-            else:
-                messagebox.showwarning("Copy Error", "Failed to copy annotation.")
+        if selection and selection[0] < len(self.temp_annotations):
+            self.last_copied_annotation = copy.deepcopy(self.temp_annotations[selection[0]])
+            self.update_status("📋 Annotation copied")
         else:
-            messagebox.showwarning("No Selection", "Please select an annotation to copy.")
-
+            messagebox.showwarning("No Selection", "Please select an annotation to copy")
+    
     def paste_annotation(self):
-        """Paste last copied annotation using AnnotationManager."""
-        if self.current_image and self.annotation_manager.last_copied_annotation:
+        """Paste last copied annotation"""
+        if self.last_copied_annotation and self.current_image:
             self.save_state_for_undo()
-            img_width, img_height = self.current_image.size
             
-            new_annotation = self.annotation_manager.paste_annotation(img_width, img_height)
+            # Create new annotation with slight offset
+            new_annotation = copy.deepcopy(self.last_copied_annotation)
+            new_annotation['bbox'][0] += 20  # Offset x
+            new_annotation['bbox'][1] += 20  # Offset y
+            new_annotation['bbox'][2] += 20  # Offset x
+            new_annotation['bbox'][3] += 20  # Offset y
             
-            if new_annotation:
-                self.display_image_on_canvas()
-                self.update_annotations_list()
-                self.update_status("📄 Annotation pasted")
-            else:
-                messagebox.showwarning("Paste Error", "Failed to paste annotation.")
+            # Ensure it's within image bounds
+            if self.current_image:
+                img_width, img_height = self.current_image.size
+                new_annotation['bbox'][0] = max(0, min(new_annotation['bbox'][0], img_width - 50))
+                new_annotation['bbox'][1] = max(0, min(new_annotation['bbox'][1], img_height - 50))
+                new_annotation['bbox'][2] = max(new_annotation['bbox'][0] + 50, min(new_annotation['bbox'][2], img_width))
+                new_annotation['bbox'][3] = max(new_annotation['bbox'][1] + 50, min(new_annotation['bbox'][3], img_height))
+            
+            self.temp_annotations.append(new_annotation)
+            self.display_image_on_canvas()
+            self.update_annotations_list()
+            self.update_status("📄 Annotation pasted")
         else:
-            messagebox.showwarning("Nothing to Paste", "No annotation copied or no image loaded.")
-
+            messagebox.showwarning("Nothing to Paste", "No annotation copied yet")
+    
     def on_annotation_select(self, event=None):
         """Handle annotation selection from listbox"""
         selection = self.annotations_listbox.curselection()
-        if selection and selection[0] < len(self.annotation_manager.temp_annotations): # Use manager's temp_annotations
+        if selection and selection[0] < len(self.temp_annotations):
             self.selected_annotation = selection[0]
             self.display_image_on_canvas()  # Refresh display to show selection
-
+    
     def get_annotation_at_point(self, x, y):
-        """Get annotation index at given canvas coordinates using AnnotationManager for temp_annotations."""
-        # Model annotations are still managed by AnnotationTool for now, so check them here.
-        img_x_model = (x - self.pan_x) / self.zoom_factor
-        img_y_model = (y - self.pan_y) / self.zoom_factor
+        """Get annotation index at given canvas coordinates"""
+        # Convert canvas coordinates to image coordinates
+        img_x = (x - self.pan_x) / self.zoom_factor
+        img_y = (y - self.pan_y) / self.zoom_factor
+        
+        # Check all annotations (reverse order to get topmost)
+        for i in reversed(range(len(self.temp_annotations))):
+            ann = self.temp_annotations[i]
+            bbox = ann['bbox']
+            if (bbox[0] <= img_x <= bbox[2] and bbox[1] <= img_y <= bbox[3]):
+                return i
+        
+        # Check model annotations
         for i in reversed(range(len(self.model_annotations))):
             ann = self.model_annotations[i]
             bbox = ann['bbox']
-            if (bbox[0] <= img_x_model <= bbox[2] and bbox[1] <= img_y_model <= bbox[3]):
-                return f"model_{i}" # Distinguish model annotation
+            if (bbox[0] <= img_x <= bbox[2] and bbox[1] <= img_y <= bbox[3]):
+                return f"model_{i}"
         
-        # Check temporary annotations via AnnotationManager
-        # AnnotationManager's get_temp_annotation_at_point expects canvas coords, but here we pass image coords
-        # For consistency, let AnnotationTool continue to convert coords and pass them if needed,
-        # or adapt AnnotationManager. For now, we'll use the existing logic structure.
-        idx = self.annotation_manager.get_temp_annotation_at_point(x, y, self.zoom_factor, self.pan_x, self.pan_y)
-        if idx is not None:
-            return idx
-            
         return None
     
     def get_resize_handle_at_point(self, x, y, annotation_idx):
@@ -479,11 +1032,10 @@ class AnnotationTool:
         if annotation_idx is None or isinstance(annotation_idx, str):
             return None
         
-        # Ensure the index is valid for temp_annotations in AnnotationManager
-        if annotation_idx >= len(self.annotation_manager.temp_annotations):
+        if annotation_idx >= len(self.temp_annotations):
             return None
         
-        bbox = self.annotation_manager.temp_annotations[annotation_idx]['bbox']
+        bbox = self.temp_annotations[annotation_idx]['bbox']
         
         # Convert to canvas coordinates
         x1 = bbox[0] * self.zoom_factor + self.pan_x
@@ -562,30 +1114,58 @@ class AnnotationTool:
             self.draw_temp_bbox(event)
     
     def handle_annotation_edit(self, canvas_x, canvas_y):
-        """Handle annotation editing (move/resize) using AnnotationManager."""
-        if self.selected_annotation is None or self.selected_annotation >= len(self.annotation_manager.temp_annotations):
+        """Handle annotation editing (move/resize)"""
+        if self.selected_annotation >= len(self.temp_annotations):
             return
-
-        img_width, img_height = self.current_image.size if self.current_image else (0,0)
         
-        # Calculate change in image coordinates
-        img_dx = (canvas_x - self.start_x) / self.zoom_factor
-        img_dy = (canvas_y - self.start_y) / self.zoom_factor
-
+        dx = canvas_x - self.start_x
+        dy = canvas_y - self.start_y
+        
+        # Convert to image coordinates
+        img_dx = dx / self.zoom_factor
+        img_dy = dy / self.zoom_factor
+        
+        bbox = self.temp_annotations[self.selected_annotation]['bbox']
+        
         if self.selected_handle == "move":
-            self.annotation_manager.move_temp_annotation_bbox(self.selected_annotation, img_dx, img_dy, img_width, img_height)
+            # Move entire annotation
+            bbox[0] += img_dx
+            bbox[1] += img_dy
+            bbox[2] += img_dx
+            bbox[3] += img_dy
         else:
-            # For resize, determine which part of the bbox is changing
-            bbox_part_update = {}
-            current_bbox = self.annotation_manager.temp_annotations[self.selected_annotation]['bbox']
-            if 'n' in self.selected_handle: bbox_part_update['y1'] = current_bbox[1] + img_dy
-            if 's' in self.selected_handle: bbox_part_update['y2'] = current_bbox[3] + img_dy
-            if 'w' in self.selected_handle: bbox_part_update['x1'] = current_bbox[0] + img_dx
-            if 'e' in self.selected_handle: bbox_part_update['x2'] = current_bbox[2] + img_dx
+            # Resize annotation
+            if 'n' in self.selected_handle:
+                bbox[1] += img_dy
+            if 's' in self.selected_handle:
+                bbox[3] += img_dy
+            if 'w' in self.selected_handle:
+                bbox[0] += img_dx
+            if 'e' in self.selected_handle:
+                bbox[2] += img_dx
             
-            self.annotation_manager.edit_temp_annotation_bbox(self.selected_annotation, bbox_part_update, img_width, img_height)
-
-        self.start_x = canvas_x # Update start for next drag segment
+            # Ensure minimum size
+            if bbox[2] - bbox[0] < 10:
+                if 'w' in self.selected_handle:
+                    bbox[0] = bbox[2] - 10
+                else:
+                    bbox[2] = bbox[0] + 10
+            
+            if bbox[3] - bbox[1] < 10:
+                if 'n' in self.selected_handle:
+                    bbox[1] = bbox[3] - 10
+                else:
+                    bbox[3] = bbox[1] + 10
+        
+        # Constrain to image bounds
+        if self.current_image:
+            img_width, img_height = self.current_image.size
+            bbox[0] = max(0, min(bbox[0], img_width))
+            bbox[1] = max(0, min(bbox[1], img_height))
+            bbox[2] = max(0, min(bbox[2], img_width))
+            bbox[3] = max(0, min(bbox[3], img_height))
+        
+        self.start_x = canvas_x
         self.start_y = canvas_y
         
         self.display_image_on_canvas()
@@ -636,32 +1216,27 @@ class AnnotationTool:
             context_menu.grab_release()
     
     def change_annotation_color_by_index(self, idx):
-        """Change annotation color by index using AnnotationManager."""
-        if 0 <= idx < len(self.annotation_manager.temp_annotations):
+        """Change annotation color by index"""
+        if 0 <= idx < len(self.temp_annotations):
             color = colorchooser.askcolor(title="Choose annotation color")[1]
             if color:
-                if self.annotation_manager.change_temp_annotation_color(idx, color):
-                    self.display_image_on_canvas()
-                    self.update_status(f"Color changed for annotation {idx+1}")
-                else:
-                    messagebox.showerror("Error", "Failed to change color.")
+                self.temp_annotations[idx]['color'] = color
+                self.display_image_on_canvas()
     
     def copy_annotation_by_index(self, idx):
-        """Copy annotation by index using AnnotationManager."""
-        if self.annotation_manager.copy_annotation(idx):
+        """Copy annotation by index"""
+        if 0 <= idx < len(self.temp_annotations):
+            self.last_copied_annotation = copy.deepcopy(self.temp_annotations[idx])
             self.update_status("📋 Annotation copied")
-        else:
-            messagebox.showwarning("Copy Error", "Could not copy selected annotation.")
-
+    
     def delete_annotation_by_index(self, idx):
-        """Delete annotation by index using AnnotationManager."""
-        if self.annotation_manager.delete_temp_annotation(idx):
-            self.save_state_for_undo() # Save state after successful deletion
+        """Delete annotation by index"""
+        if 0 <= idx < len(self.temp_annotations):
+            self.save_state_for_undo()
+            del self.temp_annotations[idx]
             self.display_image_on_canvas()
             self.update_annotations_list()
             self.update_status("🗑️ Annotation deleted")
-        else:
-            messagebox.showwarning("Delete Error", "Could not delete selected annotation.")
     
     def on_mouse_motion(self, event):
         """Handle mouse motion for cursor changes"""
@@ -707,25 +1282,28 @@ class AnnotationTool:
             self.edit_annotation_class(clicked_annotation)
     
     def edit_annotation_class(self, annotation_idx):
-        """Edit annotation class using AnnotationManager."""
-        if 0 <= annotation_idx < len(self.annotation_manager.temp_annotations):
-            current_class_val = self.annotation_manager.temp_annotations[annotation_idx]['class']
+        """Edit annotation class"""
+        if 0 <= annotation_idx < len(self.temp_annotations):
+            current_class = self.temp_annotations[annotation_idx]['class']
             
+            # Create simple dialog
             new_class = tk.simpledialog.askstring("Edit Class", 
-                                                 f"Current class: {current_class_val}\nEnter new class:",
-                                                 initialvalue=current_class_val)
+                                                 f"Current class: {current_class}\nEnter new class:",
+                                                 initialvalue=current_class)
             
             if new_class and new_class.strip():
-                if self.annotation_manager.update_temp_annotation_class(annotation_idx, new_class.strip()):
-                    self.save_state_for_undo() # Save state after successful update
-                    self.display_image_on_canvas()
-                    self.update_annotations_list()
-                    self.update_status(f"✏️ Class changed to '{new_class.strip()}'")
-                else:
-                    messagebox.showerror("Error", "Failed to update class.")
+                self.save_state_for_undo()
+                self.temp_annotations[annotation_idx]['class'] = new_class.strip()
+                self.display_image_on_canvas()
+                self.update_annotations_list()
+                self.update_status(f"✏️ Class changed to '{new_class.strip()}'")
     
-    # select_folder is now select_folder_handler in event_handlers.py
-    # load_images and its helpers remain in AnnotationTool due to complexity
+    def select_folder(self):
+        """Select folder containing images"""
+        folder = filedialog.askdirectory(title="Select Images Folder")
+        if folder:
+            self.images_folder = folder
+            self.load_images()
     
     def load_images(self):
         """Load image files from selected folder"""
@@ -775,7 +1353,7 @@ class AnnotationTool:
             # If annotations exist for an image, consider it potentially annotated
             self.annotated_images = set()
             
-            self.annotation_manager.load_existing_annotations(self.images_folder)
+            self.load_existing_annotations()
             self.start_thumbnail_loading()
             self.load_current_image()
             
@@ -795,31 +1373,24 @@ class AnnotationTool:
     
     def start_thumbnail_loading(self):
         """Start loading thumbnails"""
-        # Prevent re-entry if already loading, unless it's the very first call (current_batch_start == 0 helps here)
-        if self.loading_thumbnails and self.current_batch_start != 0: 
+        if self.loading_thumbnails:
             return
-
-        self.loading_thumbnails = True # Mark that thumbnail loading process has started
+            
+        self.loading_thumbnails = True
+        self.load_more_btn.pack(side=tk.RIGHT)
         
-        if self.current_batch_start == 0: # If it's the very first load for this dataset
-            for widget in self.thumb_scrollable_frame.winfo_children():
-                widget.destroy() # Clear previous thumbnails
-        
-        # Visibility of load_more_btn will be managed by _on_thumbnails_loaded.
-        # No need to manage it here directly before the first batch is even attempted.
+        # Clear existing thumbnails
+        for widget in self.thumb_scrollable_frame.winfo_children():
+            widget.destroy()
         
         self.load_thumbnail_batch()
     
     def load_thumbnail_batch(self):
-        """Prepare and start asynchronous loading of a thumbnail batch."""
+        """Load batch of thumbnails"""
         if not self.image_files or self.current_batch_start >= len(self.image_files):
-            self.loading_thumbnails = False # All images are loaded or no images to load
-            if hasattr(self, 'load_more_btn'):
-                self.load_more_btn.pack_forget()
+            self.loading_thumbnails = False
+            self.load_more_btn.pack_forget()
             return
-        
-        # Set loading_thumbnails to True only when a batch is actually being loaded.
-        self.loading_thumbnails = True 
         
         end_index = min(self.current_batch_start + self.thumbnail_batch_size, len(self.image_files))
         batch_files = self.image_files[self.current_batch_start:end_index]
@@ -861,32 +1432,7 @@ class AnnotationTool:
             
             # Create thumbnail frame
             thumb_frame = tk.Frame(self.thumb_scrollable_frame, bg=ModernColors.SIDEBAR_BG, 
-                                  relief=tk.SOLID, bd=1) # Default border
-            
-            # Determine status and visual cues
-            image_file_name = thumb_data['file']
-            ann_count = 0
-            if image_file_name in self.annotation_manager.annotations:
-                ann_count = len(self.annotation_manager.annotations[image_file_name])
-
-            status_text = ""
-            status_color = ModernColors.TEXT_SECONDARY # Default color
-            frame_border_color = ModernColors.BORDER # Default border color for frame
-
-            if image_file_name in self.annotated_images:
-                status_text = "✅ Completed"
-                status_color = ModernColors.BUTTON_SUCCESS 
-                frame_border_color = ModernColors.BUTTON_SUCCESS # Highlight border for completed
-                thumb_frame.configure(highlightbackground=frame_border_color, highlightthickness=2, bd=0)
-            elif ann_count > 0:
-                status_text = f"📝 {ann_count} annotations (In Progress)"
-                status_color = ModernColors.ACCENT
-                # Keep default frame border or specific color for in-progress if desired
-            else:
-                status_text = "⚪ No annotations"
-                status_color = ModernColors.TEXT_SECONDARY
-                # Keep default frame border
-
+                                  relief=tk.SOLID, bd=1)
             thumb_frame.pack(fill=tk.X, padx=5, pady=3)
             
             # Thumbnail button
@@ -907,11 +1453,15 @@ class AnnotationTool:
                                  font=('Segoe UI', 8), wraplength=180, justify=tk.LEFT)
             name_label.pack(anchor=tk.W)
             
-            # Annotation count - already determined above for status_text and color logic
-            # status_text is already set.
+            # Annotation count
+            ann_count = 0
+            if thumb_data['file'] in self.annotations:
+                ann_count = len(self.annotations[thumb_data['file']])
+            
+            status_text = f"📝 {ann_count} annotations" if ann_count > 0 else "No annotations"
             status_label = tk.Label(info_frame, text=status_text,
                                    bg=ModernColors.SIDEBAR_BG, 
-                                   fg=status_color, # Use determined status_color
+                                   fg=ModernColors.ACCENT if ann_count > 0 else ModernColors.TEXT_SECONDARY,
                                    font=('Segoe UI', 7))
             status_label.pack(anchor=tk.W, pady=(0, 3))
             
@@ -931,29 +1481,15 @@ class AnnotationTool:
             status_label.bind('<Enter>', on_enter)
             status_label.bind('<Leave>', on_leave)
         
-        self.current_batch_start += len(loaded_thumbnails) # Keep only one increment
+        self.current_batch_start += len(loaded_thumbnails)
         
         # Update scroll region
         self.thumb_canvas.update_idletasks()
         self.thumb_canvas.configure(scrollregion=self.thumb_canvas.bbox("all"))
-
-        # Manage "Load More" button visibility
-        if self.current_batch_start >= len(self.image_files):
-            if hasattr(self, 'load_more_btn'): # Check if button exists
-                self.load_more_btn.pack_forget()
-        else:
-            if hasattr(self, 'load_more_btn'): # Check if button exists
-                 # Ensure button is visible if there are more images.
-                 # It should be packed in its parent (header_frame) correctly by create_enhanced_sidebar.
-                 # Re-packing might be needed if it was forgotten.
-                self.load_more_btn.pack(side=tk.RIGHT) 
-        
-        self.loading_thumbnails = False # Finished processing this batch, ready for next trigger.
     
     def load_more_thumbnails(self):
-        """Command for the 'Load More' button."""
+        """Load more thumbnails"""
         if not self.loading_thumbnails and self.current_batch_start < len(self.image_files):
-            # load_thumbnail_batch will set self.loading_thumbnails = True if it proceeds
             self.load_thumbnail_batch()
     
     def jump_to_image(self, index):
@@ -962,7 +1498,22 @@ class AnnotationTool:
             self.current_image_index = index
             self.load_current_image()
     
-    # jump_to_image_by_number is now jump_to_image_by_number_handler in event_handlers.py
+    def jump_to_image_by_number(self, event=None):
+        """Jump to image by number"""
+        if not self.image_files:
+            messagebox.showinfo("No Images", "Please load images first.")
+            return
+        
+        try:
+            image_number = int(self.jump_entry.get())
+            if 1 <= image_number <= len(self.image_files):
+                self.current_image_index = image_number - 1
+                self.load_current_image()
+                self.update_status(f"Navigated to image {image_number} of {len(self.image_files)}")
+            else:
+                messagebox.showwarning("Invalid Number", f"Please enter a number between 1 and {len(self.image_files)}")
+        except ValueError:
+            messagebox.showwarning("Invalid Input", "Please enter a valid number.")
     
     def load_current_image(self):
         """Load and display current image"""
@@ -1032,21 +1583,21 @@ class AnnotationTool:
         if not self.boxes_visible:
             return
         
-        # Draw saved annotations (already part of temp_annotations if current image matches)
-        # current_image_name = self.image_files[self.current_image_index]
-        # if current_image_name in self.annotation_manager.annotations:
-        #     for i, ann in enumerate(self.annotation_manager.annotations[current_image_name]):
-        #         if ann.get('visible', True): # this logic might be redundant if temp_annotations is authoritative
-        #             self.draw_bbox(ann['bbox'], ann['color'], ann['class'], 
-        #                          selected=(i == self.selected_annotation and not self.reviewing_model_annotations)) # Avoid double selection highlight
+        # Draw saved annotations
+        current_image_name = self.image_files[self.current_image_index]
+        if current_image_name in self.annotations:
+            for i, ann in enumerate(self.annotations[current_image_name]):
+                if ann.get('visible', True):
+                    self.draw_bbox(ann['bbox'], ann['color'], ann['class'], 
+                                 selected=(i == self.selected_annotation))
         
-        # Draw temporary annotations from AnnotationManager
-        for i, ann in enumerate(self.annotation_manager.temp_annotations):
+        # Draw temporary annotations
+        for i, ann in enumerate(self.temp_annotations):
             if ann.get('visible', True):
                 self.draw_bbox(ann['bbox'], ann['color'], ann['class'], 
                              selected=(i == self.selected_annotation))
         
-        # Draw model annotations (still managed by AnnotationTool)
+        # Draw model annotations with different style
         for i, ann in enumerate(self.model_annotations):
             if ann.get('visible', True):
                 confidence = ann.get('confidence', 0)
@@ -1148,12 +1699,14 @@ class AnnotationTool:
         if abs(x2 - x1) > 5 and abs(y2 - y1) > 5:
             self.save_state_for_undo()
             
-            current_class = self.annotation_manager.current_class
-            color = self.annotation_manager.get_next_color()
-            bbox_coords = [int(x1), int(y1), int(x2), int(y2)]
-            
-            self.annotation_manager.add_temp_annotation(bbox_coords, current_class, color)
-            
+            annotation = {
+                'class': self.current_class,
+                'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                'visible': True,
+                'color': self.annotation_colors[self.color_index % len(self.annotation_colors)]
+            }
+            self.temp_annotations.append(annotation)
+            self.color_index += 1
             self.display_image_on_canvas()
             self.update_annotations_list()
     
@@ -1205,73 +1758,76 @@ class AnnotationTool:
         self.pan_x = 0
         self.pan_y = 0
         self.display_image_on_canvas()
-            
-    # Removed toggle_boxes_visibility, its logic is in toggle_boxes_visibility_handler
+    
+    def toggle_boxes_visibility(self):
+        """Toggle bounding box visibility"""
+        self.boxes_visible = not self.boxes_visible
+        self.display_image_on_canvas()
+        status = "visible" if self.boxes_visible else "hidden"
+        self.update_status(f"Bounding boxes {status}")
+        self.visibility_btn.configure(text="👁️ Show Boxes" if not self.boxes_visible else "👁️ Hide Boxes")
     
     def update_current_class(self, event=None):
-        """Update current class in AnnotationManager."""
+        """Update current class"""
         new_class = self.class_var.get().strip()
         if new_class:
-            self.annotation_manager.current_class = new_class
-            self.update_status(f"Current class: {self.annotation_manager.current_class}")
-
-    def load_temp_annotations(self): # Wrapper in AnnotationTool
-        """Load temporary annotations for current image using AnnotationManager."""
-        if not self.image_files or self.current_image_index >= len(self.image_files):
-            return
+            self.current_class = new_class
+            self.update_status(f"Current class: {self.current_class}")
+    
+    def load_temp_annotations(self):
+        """Load temporary annotations for current image"""
+        self.temp_annotations = []
         current_image_name = self.image_files[self.current_image_index]
-        self.annotation_manager.load_temp_annotations(current_image_name)
-        self.update_annotations_list() # UI update remains in AnnotationTool
-
+        if current_image_name in self.annotations:
+            for ann in self.annotations[current_image_name]:
+                self.temp_annotations.append(ann.copy())
+        self.update_annotations_list()
+    
     def update_annotations_list(self):
-        """Update annotations listbox from AnnotationManager's temp_annotations."""
+        """Update annotations listbox"""
         self.annotations_listbox.delete(0, tk.END)
-        for i, ann in enumerate(self.annotation_manager.temp_annotations): # Use manager's temp_annotations
+        for i, ann in enumerate(self.temp_annotations):
             status = "👁️" if ann.get('visible', True) else "🔒"
             bbox_str = f"[{ann['bbox'][0]},{ann['bbox'][1]},{ann['bbox'][2]},{ann['bbox'][3]}]"
-            model_indicator = " 🤖" if ann.get('is_model_annotation') else "" # is_model_annotation might need to be handled by AM
+            model_indicator = " 🤖" if ann.get('is_model_annotation') else ""
             self.annotations_listbox.insert(tk.END, f"{status} {ann['class']}: {bbox_str}{model_indicator}")
-
+    
     def change_annotation_color(self):
-        """Change annotation color using AnnotationManager."""
+        """Change annotation color"""
         selection = self.annotations_listbox.curselection()
         if selection:
             idx = selection[0]
-            # Ensure index is valid for manager's temp_annotations
-            if 0 <= idx < len(self.annotation_manager.temp_annotations):
+            if idx < len(self.temp_annotations):
                 color = colorchooser.askcolor(title="Choose annotation color")[1]
                 if color:
-                    if self.annotation_manager.change_temp_annotation_color(idx, color):
-                        self.display_image_on_canvas()
-                        self.update_status("Color changed.")
-                    else:
-                        messagebox.showerror("Error", "Failed to change color via manager.")
-            else:
-                messagebox.showwarning("Selection Error", "Invalid annotation selected.")
-
+                    self.temp_annotations[idx]['color'] = color
+                    self.display_image_on_canvas()
+    
     def delete_selected_annotation(self):
-        """Delete selected annotation using AnnotationManager."""
+        """Delete selected annotation"""
         selection = self.annotations_listbox.curselection()
         if selection:
             idx = selection[0]
-            if self.annotation_manager.delete_temp_annotation(idx):
-                self.save_state_for_undo() # Save state after successful deletion
+            if idx < len(self.temp_annotations):
+                self.save_state_for_undo()
+                del self.temp_annotations[idx]
                 self.display_image_on_canvas()
                 self.update_annotations_list()
-                self.update_status("Annotation deleted.")
-            else:
-                messagebox.showerror("Delete Error", "Failed to delete annotation via manager.")
-        else:
-            messagebox.showwarning("No Selection", "Please select an annotation to delete.")
-
+    
     def update_annotations(self):
-        """Update annotations using AnnotationManager."""
+        """Update annotations"""
         if not self.image_files:
             return
         
         current_image_name = self.image_files[self.current_image_index]
-        self.annotation_manager.update_annotations_for_current_image(current_image_name)
-        self.annotation_manager.save_annotations(self.images_folder) # Pass images_folder
+        visible_annotations = [ann for ann in self.temp_annotations if ann.get('visible', True)]
+        
+        if visible_annotations:
+            self.annotations[current_image_name] = visible_annotations
+        elif current_image_name in self.annotations:
+            del self.annotations[current_image_name]
+        
+        self.save_annotations()
         self.update_status("✅ Annotations updated successfully")
     
     def complete_current_annotation(self):
@@ -1286,7 +1842,7 @@ class AnnotationTool:
         self.update_annotations()
         
         # Mark as annotated
-        if current_image_name in self.annotation_manager.annotations and len(self.annotation_manager.annotations[current_image_name]) > 0:
+        if current_image_name in self.annotations and len(self.annotations[current_image_name]) > 0:
             self.annotated_images.add(current_image_name)
             self.update_status(f"✅ Image {current_image_name} marked as completely annotated")
             
@@ -1362,7 +1918,7 @@ class AnnotationTool:
                 name_label.pack(anchor=tk.W)
                 
                 # Annotation count
-                ann_count = len(self.annotation_manager.annotations[image_file]) # Use manager's annotations
+                ann_count = len(self.annotations[image_file])
                 status_text = f"📝 {ann_count} annotations"
                 status_label = tk.Label(info_frame, text=status_text,
                                        bg=ModernColors.SIDEBAR_BG, 
@@ -1389,17 +1945,84 @@ class AnnotationTool:
             except Exception as e:
                 print(f"Error creating annotated thumbnail for {image_file}: {e}")
     
-    # Methods get_image_dimensions, load_existing_annotations, save_annotations are now in AnnotationManager
-    # Calls will be self.annotation_manager.method_name(self.images_folder) or similar
-
+    def save_annotations(self):
+        """Save annotations to file"""
+        if not self.images_folder:
+            return
+        
+        annotations_file = os.path.join(self.images_folder, "annotations.txt")
+        try:
+            with open(annotations_file, 'w') as f:
+                for image_name, anns in self.annotations.items():
+                    img_width, img_height = self.get_image_dimensions(image_name)
+                    
+                    for ann in anns:
+                        x1, y1, x2, y2 = ann['bbox']
+                        center_x = (x1 + x2) / 2 / img_width
+                        center_y = (y1 + y2) / 2 / img_height
+                        width = (x2 - x1) / img_width
+                        height = (y2 - y1) / img_height
+                        f.write(f"{image_name},{ann['class']},{center_x:.6f},{center_y:.6f},{width:.6f},{height:.6f}\n")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save annotations: {e}")
+    
+    def get_image_dimensions(self, image_name):
+        """Get image dimensions"""
+        try:
+            image_path = os.path.join(self.images_folder, image_name)
+            with Image.open(image_path) as img:
+                return img.size
+        except:
+            return 640, 480
+    
+    def load_existing_annotations(self):
+        """Load existing annotations"""
+        if not self.images_folder:
+            return
+        
+        annotations_file = os.path.join(self.images_folder, "annotations.txt")
+        if os.path.exists(annotations_file):
+            try:
+                self.annotations = {}
+                with open(annotations_file, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split(',')
+                        if len(parts) >= 6:
+                            image_name = parts[0]
+                            class_name = parts[1]
+                            center_x = float(parts[2])
+                            center_y = float(parts[3])
+                            width = float(parts[4])
+                            height = float(parts[5])
+                            
+                            img_width, img_height = self.get_image_dimensions(image_name)
+                            
+                            x1 = int((center_x - width/2) * img_width)
+                            y1 = int((center_y - height/2) * img_height)
+                            x2 = int((center_x + width/2) * img_width)
+                            y2 = int((center_y + height/2) * img_height)
+                            
+                            annotation = {
+                                'class': class_name,
+                                'bbox': [x1, y1, x2, y2],
+                                'visible': True,
+                                'color': self.annotation_colors[len(self.annotations.get(image_name, [])) % len(self.annotation_colors)]
+                            }
+                            
+                            if image_name not in self.annotations:
+                                self.annotations[image_name] = []
+                            self.annotations[image_name].append(annotation)
+            except Exception as e:
+                print(f"Error loading annotations: {e}")
+    
     def preview_annotations(self):
-        """Preview annotations from AnnotationManager's temp_annotations."""
-        if not self.annotation_manager.temp_annotations: # Use manager's temp_annotations
+        """Preview annotations"""
+        if not self.temp_annotations:
             messagebox.showinfo("Preview", "No annotations to preview for current image.")
             return
         
         preview_text = f"Annotations for {self.image_files[self.current_image_index]}:\n\n"
-        for i, ann in enumerate(self.annotation_manager.temp_annotations): # Use manager's temp_annotations
+        for i, ann in enumerate(self.temp_annotations):
             status = "Visible" if ann.get('visible', True) else "Hidden"
             preview_text += f"{i+1}. Class: {ann['class']}\n"
             preview_text += f"   Bbox: {ann['bbox']}\n"
@@ -1408,8 +2031,25 @@ class AnnotationTool:
         
         messagebox.showinfo("Annotation Preview", preview_text)
     
-    # Removed previous_image, next_image, train_model, try_model
-    # Their logic is now in event_handlers.py and called from ui_components.py
+    def previous_image(self):
+        """Go to previous image"""
+        if self.image_files and self.current_image_index > 0:
+            self.current_image_index -= 1
+            self.load_current_image()
+    
+    def next_image(self):
+        """Go to next image"""
+        if self.image_files and self.current_image_index < len(self.image_files) - 1:
+            self.current_image_index += 1
+            self.load_current_image()
+    
+    def train_model(self):
+        """Train model placeholder"""
+        messagebox.showinfo("Train Model", "🚀 Model training functionality will be implemented in the next phase.\n\nThis will include:\n• Data preprocessing\n• Model architecture selection\n• Training progress monitoring\n• Model evaluation metrics")
+    
+    def try_model(self):
+        """Try model placeholder"""
+        messagebox.showinfo("Try Model", "🧪 Model testing functionality will be implemented in the next phase.\n\nThis will include:\n• Load trained models\n• Real-time inference\n• Batch processing\n• Results visualization")
     
     def complete_current_annotation(self):
         """Mark current image as completely annotated"""
@@ -1423,7 +2063,7 @@ class AnnotationTool:
         self.update_annotations()
         
         # Mark as annotated
-        if current_image_name in self.annotation_manager.annotations and len(self.annotation_manager.annotations[current_image_name]) > 0: # Use manager
+        if current_image_name in self.annotations and len(self.annotations[current_image_name]) > 0:
             self.annotated_images.add(current_image_name)
             self.update_status(f"✅ Image {current_image_name} marked as completely annotated")
             
@@ -1499,12 +2139,12 @@ class AnnotationTool:
                                      font=('Segoe UI', 8), wraplength=180, justify=tk.LEFT)
                 name_label.pack(anchor=tk.W)
                 
-                # Annotation count for display in "Annotated" tab. Always show as completed.
-                ann_count_for_display = len(self.annotation_manager.annotations.get(image_file, []))
-                status_text = f"✅ {ann_count_for_display} annotations (Completed)"
+                # Annotation count
+                ann_count = len(self.annotations[image_file])
+                status_text = f"📝 {ann_count} annotations"
                 status_label = tk.Label(info_frame, text=status_text,
                                        bg=ModernColors.SIDEBAR_BG, 
-                                       fg=ModernColors.BUTTON_SUCCESS, # Always success color for this tab
+                                       fg=ModernColors.ACCENT,
                                        font=('Segoe UI', 7))
                 status_label.pack(anchor=tk.W, pady=(0, 3))
                 
@@ -1531,9 +2171,61 @@ class AnnotationTool:
         """Update status bar"""
         self.status_bar.configure(text=message)
     
-    # toggle_boxes_visibility and jump_to_image_by_number (the one that was bound to GUI)
-    # were already removed or their logic moved to event_handlers.py.
-    # The jump_to_image method below is for internal programmatic jumps.
+    def toggle_boxes_visibility(self):
+        """Toggle the visibility of annotation boxes"""
+        if not hasattr(self, 'boxes_visible'):
+            self.boxes_visible = True
+        
+        # Toggle state
+        self.boxes_visible = not self.boxes_visible
+        
+        if self.boxes_visible:
+            # Show boxes
+            self.redraw_annotations()
+            self.update_status("👁️ Bounding boxes are now visible")
+            if hasattr(self, 'visibility_btn'):
+                self.visibility_btn.configure(text="👁️ Hide Boxes")
+        else:
+            # Hide boxes
+            self.canvas.delete('annotation')
+            self.canvas.delete('selected')
+            self.update_status("👂 Bounding boxes are now hidden")
+            if hasattr(self, 'visibility_btn'):
+                self.visibility_btn.configure(text="👁️ Show Boxes")
+    
+    def jump_to_image_by_number(self):
+        """Jump to a specific image by its number"""
+        if not self.image_files:
+            messagebox.showinfo("No Images", "Please load images first.")
+            return
+        
+        try:
+            if not hasattr(self, 'jump_entry') or not self.jump_entry:
+                return
+            
+            # Get the number from the entry field
+            image_number = int(self.jump_entry.get())
+            
+            # Check if the number is valid
+            if image_number < 1 or image_number > len(self.image_files):
+                messagebox.showwarning("Invalid Number", 
+                                    f"Please enter a number between 1 and {len(self.image_files)}")
+                return
+            
+            # Adjust for 0-based indexing
+            target_index = image_number - 1
+            
+            # Jump to the image
+            self.jump_to_image(target_index)
+            self.update_status(f"Navigated to image {image_number} of {len(self.image_files)}")
+            
+            # Clear the entry field
+            self.jump_entry.delete(0, tk.END)
+            
+        except ValueError:
+            messagebox.showwarning("Invalid Input", "Please enter a valid number.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
     
     def jump_to_image(self, index):
         """Jump directly to an image by its index"""

@@ -1,0 +1,11 @@
+{
+  "name": "retail_store",
+  "path": "data\\projects\\retail_store",
+  "description": "",
+  "created_at": "2025-05-24T09:16:27.063445",
+  "modified_at": "2025-05-24T09:16:27.063445",
+  "image_directory": "",
+  "annotation_format": "YOLO",
+  "classes": {},
+  "settings": {}
+}

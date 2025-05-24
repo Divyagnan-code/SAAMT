@@ -1,0 +1,31 @@
+# Project Structure:
+# annotation_framework/
+# ├── main.py
+# ├── config/
+# │   ├── __init__.py
+# │   └── settings.py
+# ├── core/
+# │   ├── __init__.py
+# │   ├── annotation_manager.py
+# │   ├── project_manager.py
+# │   └── image_processor.py
+# ├── models/
+# │   ├── __init__.py
+# │   ├── model_interface.py
+# │   └── inference_engine.py
+# ├── ui/
+# │   ├── __init__.py
+# │   ├── main_window.py
+# │   ├── annotation_widget.py
+# │   ├── image_list_widget.py
+# │   ├── tools_panel.py
+# │   └── dialogs.py
+# ├── utils/
+# │   ├── __init__.py
+# │   ├── file_utils.py
+# │   ├── image_utils.py
+# │   └── async_utils.py
+# └── data/
+#     ├── annotations/
+#     ├── images/
+#     └── models/
